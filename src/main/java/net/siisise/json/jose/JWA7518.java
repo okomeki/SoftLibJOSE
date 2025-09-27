@@ -19,7 +19,13 @@ import net.siisise.security.block.RSAES_PKCS1_v1_5;
 import net.siisise.security.digest.SHA256;
 import net.siisise.security.digest.SHA384;
 import net.siisise.security.digest.SHA512;
+import net.siisise.security.ec.EdWards;
+import net.siisise.security.ec.EllipticCurve;
 import net.siisise.security.key.AESKeyWrap;
+import net.siisise.security.key.ECDSAPrivateKey;
+import net.siisise.security.key.ECDSAPublicKey;
+import net.siisise.security.key.EdDSAPrivateKey;
+import net.siisise.security.key.EdDSAPublicKey;
 import net.siisise.security.key.RSAMiniPrivateKey;
 import net.siisise.security.key.RSAPublicKey;
 import net.siisise.security.mac.HMAC;
@@ -30,8 +36,11 @@ import net.siisise.security.mode.StreamAEAD;
 import net.siisise.security.padding.EME;
 import net.siisise.security.padding.MGF;
 import net.siisise.security.padding.MGF1;
+import net.siisise.security.sign.ECDSA;
+import net.siisise.security.sign.EdDSA;
 import net.siisise.security.sign.RSASSA_PKCS1_v1_5;
 import net.siisise.security.sign.RSASSA_PSS;
+import net.siisise.security.sign.SignVerify;
 
 /**
  * JWA アルゴリズム
@@ -138,6 +147,57 @@ public class JWA7518 {
         boolean verify(JSONObject jwk, byte[] data, byte[] sign);
         boolean verify(byte[] sign);
     }
+    
+    static abstract class SignVerifyAlgorithm<E extends SignVerify> implements SignAlgorithm {
+        E e;
+
+        @Override
+        public void update(byte[] data) {
+            e.update(data);
+        }
+
+        /**
+         * JWK RSA秘密鍵で署名.
+         * @param jwkPrv JWK RSA秘密鍵
+         * @param data メッセージ
+         * @return 署名
+         */
+        @Override
+        public byte[] sign(JSONObject jwkPrv, byte[] data) {
+            initPrivate(jwkPrv);
+            update(data);
+            return sign();
+        }
+
+        @Override
+        public byte[] sign() {
+            return e.sign();
+        }
+
+        /**
+         * 署名検証.
+         * @param jwkPub JWK公開鍵 または JWKフル秘密鍵
+         * @param data メッセージ
+         * @param sign 署名
+         * @return 可否
+         */
+        @Override
+        public boolean verify(JSONObject jwkPub, byte[] data, byte[] sign) {
+            initPublic(jwkPub);
+            update(data);
+            return verify(sign);
+        }
+
+        /**
+         * 署名検証.
+         * @param sign 署名
+         * @return 可否
+         */
+        @Override
+        public boolean verify(byte[] sign) {
+            return e.verify(sign);
+        }
+    }
 
     /**
      * RSASSA で使用するDigestの選択.
@@ -206,35 +266,19 @@ public class JWA7518 {
         BigInteger e = decodeBigHex((String)jwk.get("e"));
         return new RSAPublicKey(n, e);
     }
-    
-    /**
-     * RSASSAの選択.
-     * @param alg アルゴリズム
-     * @return RSASSA
-     */
-    static RSASSA toRSASSA(String alg) {
-        if ( alg.startsWith("RS")) {
-            return new PKCS1(alg);
-        } else if ( alg.startsWith("PS")) {
-            return new PSS(alg);
-        }
-        throw new UnsupportedOperationException();
-    }
 
     /**
      * RSASSAの使いやすそうな形.
      */
-    static abstract class RSASSA implements SignAlgorithm {
+    static class RSASSA extends SignVerifyAlgorithm<net.siisise.security.sign.RSASSA> {
 
-        net.siisise.security.sign.RSASSA ssa;
-        
         /**
          * RSA秘密鍵で初期化.
          * @param jwkPrv JWK秘密鍵
          */
         @Override
         public void initPrivate(JSONObject jwkPrv) {
-            ssa.init(jwkToRSAPrivate(jwkPrv));
+            e.init(jwkToRSAPrivate(jwkPrv));
         }
 
         /**
@@ -244,54 +288,7 @@ public class JWA7518 {
          */
         @Override
         public void initPublic(JSONObject jwkPub) {
-            ssa.init(jwkToRSAPublic(jwkPub));
-        }
-        
-        @Override
-        public void update(byte[] m) {
-            ssa.update(m);
-        }
-        
-        @Override
-        public byte[] sign() {
-            return ssa.sign();
-        }
-
-        /**
-         * JWK RSA秘密鍵で署名.
-         * @param jwkPrv JWK RSA秘密鍵
-         * @param data メッセージ
-         * @return 署名
-         */
-        @Override
-        public byte[] sign(JSONObject jwkPrv, byte[] data) {
-            initPrivate(jwkPrv);
-            update(data);
-            return sign();
-        }
-
-        /**
-         * 署名検証.
-         * @param sign 署名
-         * @return 可否
-         */
-        @Override
-        public boolean verify(byte[] sign) {
-            return ssa.verify(sign);
-        }
-
-        /**
-         * 署名検証.
-         * @param jwkPub JWK公開鍵 または JWKフル秘密鍵
-         * @param data メッセージ
-         * @param sign 署名
-         * @return 可否
-         */
-        @Override
-        public boolean verify(JSONObject jwkPub, byte[] data, byte[] sign) {
-            initPublic(jwkPub);
-            update(data);
-            return verify(sign);
+            e.init(jwkToRSAPublic(jwkPub));
         }
 
     }
@@ -302,7 +299,7 @@ public class JWA7518 {
     static class PKCS1 extends RSASSA {
         
         PKCS1(String alg) {
-            ssa = new RSASSA_PKCS1_v1_5(toDigest(alg));
+            e = new RSASSA_PKCS1_v1_5(toDigest(alg));
         }
     }
 
@@ -316,8 +313,159 @@ public class JWA7518 {
             MessageDigest md = toDigest(alg);
             int dl = md.getDigestLength();
             MGF mgf = new MGF1(md);
-            ssa = new RSASSA_PSS(toDigest(alg), mgf, dl);
+            e = new RSASSA_PSS(toDigest(alg), mgf, dl);
         }
+    }
+    
+    static class EC extends SignVerifyAlgorithm<ECDSA> {
+        
+        EllipticCurve.ECCurvep c;
+        MessageDigest md;
+        
+        EC(String alg) {
+            if ("ES256K".equals(alg)) {
+                c = EllipticCurve.secp256k1;
+                alg = "ES256";
+            } else if ("ES256".equals(alg)) {
+                c = EllipticCurve.P256;
+            } else if ("ES384".equals(alg)) {
+                c = EllipticCurve.P384;
+            } else if ("ES512".equals(alg)) {
+                c = EllipticCurve.P521;
+            } else {
+                throw new UnsupportedOperationException("Not supported yet.");
+            }
+            
+            md = toDigest(alg);
+            e = new ECDSA(c, md);
+        }
+
+        @Override
+        public void initPrivate(JSONObject jwk) {
+            String crv = (String)jwk.get("crv");
+            EllipticCurve.ECCurvep c2;
+
+            c2 = crv(crv);
+            BigInteger d = toBI((String)jwk.get("d"), c2.p.bitLength());
+            e = new ECDSA(new ECDSAPrivateKey(c2,d), md);
+        }
+
+        private static BigInteger toBI(String b, int len) {
+            BASE64 b64 = new BASE64(BASE64.URL, 0);
+            byte[] ob = b64.decode(b);
+            if (ob.length != (len + 7) / 8) {
+                throw new IllegalStateException();
+            }
+            return net.siisise.ietf.pkcs1.PKCS1.OS2IP(ob);
+        }
+        
+        EllipticCurve.ECCurvep crv(String crv) {
+            if ("P-256".equals(crv)) {
+                return EllipticCurve.P256;
+            } else if ("P-384".equals(crv)) {
+                return EllipticCurve.P384;
+            } else if ("P-521".equals(crv)) {
+                return EllipticCurve.P521;
+            } else if ("secp256k1".equals(crv)) {
+                return EllipticCurve.secp256k1;
+            } else {
+                throw new UnsupportedOperationException(crv);
+            }
+        }
+
+        @Override
+        public void initPublic(JSONObject jwk) {
+            String crv = (String)jwk.get("crv");
+            EllipticCurve.ECCurvep c2;
+            MessageDigest md;
+            
+            c2 = crv(crv);
+
+            if (!c2.oid.equals(c.oid)) {
+                throw new IllegalStateException();
+            }
+            
+            if ("P-256".equals(crv)) {
+                md = new SHA256();
+            } else if ("P-384".equals(crv)) {
+                md = new SHA384();
+            } else if ("P-521".equals(crv)) {
+                md = new SHA512();
+            } else if ("secp256k1".equals(crv)) {
+                md = new SHA256();
+            } else {
+                throw new UnsupportedOperationException(crv);
+            }
+            BigInteger x = toBI((String)jwk.get("x"),c2.p.bitLength());
+            BigInteger y = toBI((String)jwk.get("y"),c2.p.bitLength());
+            e = new ECDSA(new ECDSAPublicKey(c2, x, y), md);
+        }
+    }
+
+    /**
+     * RFC 8037
+     */
+    static class Ed extends SignVerifyAlgorithm<EdDSA> {
+
+        Ed() {
+            
+        }
+
+        @Override
+        public void initPrivate(JSONObject jwk) {
+            EdWards ed;
+            String kty = (String)jwk.get("kty");
+            String crv = (String)jwk.get("crv");
+            if (!"OKP".equals(kty)) {
+                throw new IllegalStateException();
+            }
+            if ( "Ed25519".equals(crv)) {
+                ed = EdDSA.init25519();
+            } else if ("Ed448".equals(crv)) {
+                ed = EdDSA.init448();
+            } else {
+                throw new UnsupportedOperationException();
+            }
+            BASE64 b64 = new BASE64(BASE64.URL, 0);
+            byte[] d = b64.decode((String)jwk.get("d"));
+            EdDSAPrivateKey prv = new EdDSAPrivateKey(ed, d);
+            e = new EdDSA(prv);
+        }
+
+        @Override
+        public void initPublic(JSONObject jwk) {
+            EdWards ed;
+            String kty = (String)jwk.get("kty");
+            if (!"OKP".equals(kty)) {
+                throw new IllegalStateException();
+            }
+            String crv = (String)jwk.get("crv");
+            if ( "Ed25519".equals(crv)) {
+                ed = EdDSA.init25519();
+            } else if ("Ed448".equals(crv)) {
+                ed = EdDSA.init448();
+            } else {
+                throw new UnsupportedOperationException();
+            }
+            BASE64 b64 = new BASE64(BASE64.URL, 0);
+            byte[] x = b64.decode((String)jwk.get("x"));
+            EdDSAPublicKey pub = new EdDSAPublicKey(ed, x);
+            e = new EdDSA(pub);
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
+    }
+
+    static SignAlgorithm toSign(String alg) {
+        if (alg.startsWith("RS")) {
+            return new PKCS1(alg);
+        } else if (alg.startsWith("ES")) {
+            return new EC(alg);
+        } else if (alg.startsWith("PS")) {
+            return new PSS(alg);
+        } else if (alg.equals("EdDSA")) {
+            return new Ed();
+        }
+        throw new UnsupportedOperationException();
     }
 
     static StreamAEAD blockAlg(String alg) {
@@ -430,6 +578,11 @@ public class JWA7518 {
         public byte[] decrypt(byte[] em) {
             return em;
         }
+
+        @Override
+        public int getBlockLength() {
+            throw new UnsupportedOperationException("Not supported yet.");
+        }
     }
 
     /**
@@ -464,6 +617,11 @@ public class JWA7518 {
         @Override
         public byte[] decrypt(byte[] em) {
             return kw.decrypt(em);
+        }
+
+        @Override
+        public int getBlockLength() {
+            throw new UnsupportedOperationException("Not supported yet.");
         }
     }
 
@@ -522,6 +680,11 @@ public class JWA7518 {
                 throw new IllegalStateException();
             }
             return cek;
+        }
+
+        @Override
+        public int getBlockLength() {
+            throw new UnsupportedOperationException("Not supported yet.");
         }
     }
 
@@ -604,6 +767,11 @@ public class JWA7518 {
             kw.init(k);
 
             return kw.decrypt(c);
+        }
+
+        @Override
+        public int getBlockLength() {
+            throw new UnsupportedOperationException("Not supported yet.");
         }
     }
     

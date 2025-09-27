@@ -54,16 +54,17 @@ public class JWS7515Test {
     @Test
     public void testExample3() throws NoSuchAlgorithmException {
         System.out.println("RFC 7515 Section 3.3. Example JWS");
-        JWS7515 jws = new JWS7515();
-        JSONObject jwk = new JSONObject();
         String expResult = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
                 + ".eyJpc3MiOiJqb2UiLCJleHAiOjEzMDA4MTkzODAsImh0dHA6Ly9leGFtcGxlLmNvbS9pc19yb290Ijp0cnVlfQ"
                 + ".d6nMDXnJZfNNj-1o1e75s6d0six0lkLp5hSrGaz4o9A";
+        JSONObject jwk = new JSONObject();
         jwk.put("kty", "oct");
         jwk.put("k", "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow");
         BASE64 b64 = new BASE64(BASE64.URL, 0);
         byte[] hkey = b64.decode((String) jwk.get("k"));
-        
+
+        JWS7515 jws = new JWS7515();
+        // JWS
         JSONObject payExample = new JSONObject();
         payExample.put("iss", "joe");
         payExample.put("exp", 1300819380);
@@ -74,13 +75,51 @@ public class JWS7515Test {
         byte[] payload = ((String)payExample.rebind(JSON.NOBR_MINESC)).getBytes(StandardCharsets.UTF_8);
         
         jws.setTyp("JWT");
-        jws.setKey(hkey); // HMAC-SHA-256 前提
+        jws.setKey(jwk); // HMAC-SHA-256 前提
         String rsJWS = jws.compact(payExample.toJSON());
         
         byte[] valid = jws.validateCompact(rsJWS);
         
         assertArrayEquals(payload, valid);
         assertEquals(expResult, rsJWS);
+    }
+    
+    @Test
+    public void testHMAC() throws NoSuchAlgorithmException {
+        System.out.println("RFC 7515 Appendix A.1.1.");
+        JWS7515 jws = new JWS7515();
+        JSONObject jwk = new JSONObject();
+        jwk.put("kty", "oct");
+        jwk.put("k", "AyM1SysPpbyDfgZld3umj1qzKObwVMkoqQ-EstJQLr_T-1qS0gZH75aKtMN3Yj0iPS4hcgUuTwjAzZr1Z9CAow");
+        BASE64 b64 = new BASE64(BASE64.URL, 0);
+        byte[] hkey = b64.decode((String) jwk.get("k"));
+        
+        // JWS
+        JSONObject payExample = new JSONObject();
+        payExample.put("iss", "joe");
+        payExample.put("exp", 1300819380);
+        payExample.put("http://example.com/is_root", true);
+        
+        jws.setTyp("JWT");
+        jws.setKey(jwk);
+        
+    }
+
+    @Test
+    public void testECDSA() {
+        System.out.println("RFC 7515 A.3");
+        JWS7515 jws = new JWS7515();
+        JSONObject jwk = new JSONObject();
+        jwk.put("kty", "ES");
+        String expResult = "";
+        
+        
+        // JWS
+        JSONObject payExample = new JSONObject();
+        payExample.put("iss", "joe");
+        payExample.put("exp", 1300819380);
+        payExample.put("http://example.com/is_root", true);
+
     }
 
     /**
