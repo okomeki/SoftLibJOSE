@@ -3,6 +3,8 @@ package net.siisise.json.jose;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
+import java.security.interfaces.ECPrivateKey;
+import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.util.HashMap;
 import java.util.Map;
@@ -14,7 +16,10 @@ import net.siisise.security.mac.HMAC;
 import net.siisise.json.JSON;
 import net.siisise.json.JSONArray;
 import net.siisise.json.JSONValue;
+import net.siisise.security.ec.EdWards;
+import net.siisise.security.key.EdDSAPrivateKey;
 import net.siisise.security.key.RSAPublicKey;
+import net.siisise.security.sign.EdDSA;
 
 /**
  * JSON Web Signature (JWS).
@@ -92,6 +97,22 @@ public class JWS7515 {
         }
         jwsCompactHeader = null;
     }
+    
+    /**
+     * set HMAC JWK
+     * 
+     * @param jwk HMAC JWK
+     */
+    public void setKey(JSONObject jwk) throws NoSuchAlgorithmException {
+        String kty = (String) jwk.get("kty");
+        if (kty.equals("oct")) { // HMAC
+            BASE64 b64 = new BASE64(BASE64.URL,0);
+            byte[] hkey = b64.decode((String)jwk.get("k"));
+            setKey(hkey);
+        } else {
+            throw new UnsupportedOperationException();
+        }
+    }
 
     /**
      * RSA秘密鍵 (署名用)
@@ -99,8 +120,8 @@ public class JWS7515 {
      * @param alg RS256 など
      * @param pkey RSA秘密鍵
      */
-    public void setRsaKey(String kid, String alg, RSAPrivateKey pkey) {
-        setRsaKey(kid, alg, JWK7517.rsaPrivateToJwk(pkey));
+    public void setKey(String kid, String alg, RSAPrivateKey pkey) {
+        setKey(kid, alg, JWK7517.toJwk(pkey));
     }
 
     /**
@@ -110,8 +131,16 @@ public class JWS7515 {
      * @param alg アルゴリズム RS256など
      * @param key RSA公開鍵
      */
-    public void setRsaKey(String kid, String alg, RSAPublicKey key) {
-        setRsaKey(kid, alg, JWK7517.rsaPublicToJwk(key));
+    public void setKey(String kid, String alg, RSAPublicKey key) {
+        setKey(kid, alg, JWK7517.toJwk(key));
+    }
+
+    public void setKey(String kid, String alg, ECPrivateKey pkey) {
+        setKey(kid, alg, JWK7517.toJwk(pkey));
+    }
+
+    public void setKey(String kid, String alg, ECPublicKey key) {
+        setKey(kid, alg, JWK7517.toJwk(key));
     }
 
     /**
@@ -120,7 +149,7 @@ public class JWS7515 {
      * @param alg RS256 など
      * @param key 鍵
      */
-    public void setRsaKey(String kid, String alg, JSONObject key) {
+    public void setKey(String kid, String alg, JSONObject key) {
         if ( rsakeyList == null ) {
             rsakeyList = new JSONArray();
         }
@@ -239,7 +268,7 @@ public class JWS7515 {
         }
         return sb.toString();
     }
-    
+
     /**
      * RSASSA_PKCS1_v1_5 sign
      * RSASSA-PSS
@@ -249,7 +278,7 @@ public class JWS7515 {
     private byte[] signRSASSA(byte[] data) {
         String alg = getAlg(); //(String) protectedHeader.get("alg");
         String kid = getKid();
-        JWA7518.RSASSA ssa = JWA7518.toRSASSA(alg);
+        JWA7518.SignAlgorithm ssa = JWA7518.toSign(alg);
         JSONObject jwk = selectKey(kid); // 秘密鍵を指しておいて
         ssa.initPrivate(jwk);
         ssa.update(data);
@@ -257,9 +286,32 @@ public class JWS7515 {
     }
 
     /**
+     * 
+     * @param curve 曲線
+     * @param data メッセージ
+     * @return 署名
+     */
+    private byte[] signEdDSA(byte[] data) {
+        byte[] key = skey.getEncoded();
+        String crv = (String)protectedHeader.get("crv");
+        EdWards curve;
+        if ( "Ed25519".equals(crv)) {
+            curve = EdDSA.init25519();
+        } else if ("Ed448".equals(crv)) {
+            curve = EdDSA.init448();
+        } else {
+            throw new UnsupportedOperationException();
+        }
+        EdDSAPrivateKey pkey = new EdDSAPrivateKey(curve, key);
+        EdDSA ed = new EdDSA(pkey);
+        ed.update(data);
+        return ed.sign();
+    }
+
+    /**
      * HS256, HS384, HS512 sign.
-     * @param data
-     * @return 
+     * @param data メッセージ
+     * @return 署名
      */
     private byte[] signHMAC(byte[] data) {
         byte[] key = skey.getEncoded();
@@ -279,8 +331,13 @@ public class JWS7515 {
         String alg = getAlg();
         if ( skey != null && alg.startsWith("HS")) {
             return signHMAC(s);
-        } else if ( alg.startsWith("RS") || alg.startsWith("PS")) {
+        } else if ( alg.startsWith("RS")
+                 || alg.startsWith("ES")
+                 || alg.startsWith("PS")
+                ) {
             return signRSASSA(s);
+        } else if (alg.equals("EdDSA")) { // RFC 8037
+            return signEdDSA(s);
         } else if (!"none".equals(alg)) {
             throw new SecurityException("alg:" + alg);
         }
@@ -310,7 +367,7 @@ public class JWS7515 {
         BASE64 b64 = new BASE64(BASE64.URL, 0);
         byte[] m = (sp[0] + "." + sp[1]).getBytes(UTF8);
         byte[] s = b64.decode(sp[2]);
-        JWA7518.RSASSA ssa = JWA7518.toRSASSA(alg);
+        JWA7518.SignAlgorithm ssa = JWA7518.toSign(alg);
         JSONObject jwk = selectKey((String)jwsHeader.get("kid"));
         ssa.initPublic(jwk);
         ssa.update(m);
