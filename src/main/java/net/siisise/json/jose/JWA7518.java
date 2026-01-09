@@ -19,6 +19,7 @@ import net.siisise.security.block.RSAES_PKCS1_v1_5;
 import net.siisise.security.digest.SHA256;
 import net.siisise.security.digest.SHA384;
 import net.siisise.security.digest.SHA512;
+import net.siisise.security.ec.ECCurvep;
 import net.siisise.security.ec.EdWards;
 import net.siisise.security.ec.EllipticCurve;
 import net.siisise.security.key.AESKeyWrap;
@@ -319,7 +320,7 @@ public class JWA7518 {
     
     static class EC extends SignVerifyAlgorithm<ECDSA> {
         
-        EllipticCurve.ECCurvep c;
+        ECCurvep c;
         MessageDigest md;
         
         EC(String alg) {
@@ -343,7 +344,7 @@ public class JWA7518 {
         @Override
         public void initPrivate(JSONObject jwk) {
             String crv = (String)jwk.get("crv");
-            EllipticCurve.ECCurvep c2;
+            ECCurvep c2;
 
             c2 = crv(crv);
             BigInteger d = toBI((String)jwk.get("d"), c2.p.bitLength());
@@ -359,7 +360,7 @@ public class JWA7518 {
             return net.siisise.ietf.pkcs1.PKCS1.OS2IP(ob);
         }
         
-        EllipticCurve.ECCurvep crv(String crv) {
+        ECCurvep crv(String crv) {
             if ("P-256".equals(crv)) {
                 return EllipticCurve.P256;
             } else if ("P-384".equals(crv)) {
@@ -376,7 +377,7 @@ public class JWA7518 {
         @Override
         public void initPublic(JSONObject jwk) {
             String crv = (String)jwk.get("crv");
-            EllipticCurve.ECCurvep c2;
+            ECCurvep c2;
             MessageDigest md;
             
             c2 = crv(crv);

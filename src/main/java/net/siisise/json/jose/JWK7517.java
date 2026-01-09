@@ -13,10 +13,12 @@ import net.siisise.json.JSON;
 import net.siisise.json.JSONArray;
 import net.siisise.json.JSONObject;
 import net.siisise.json.JSONString;
+import net.siisise.security.ec.ECCurve;
 import net.siisise.security.ec.EdWards;
 import net.siisise.security.ec.EdWards25519;
 import net.siisise.security.ec.EdWards448;
 import net.siisise.security.ec.EllipticCurve;
+import net.siisise.security.ec.ECCurvep;
 import net.siisise.security.key.ECDSAPrivateKey;
 import net.siisise.security.key.ECDSAPublicKey;
 import net.siisise.security.key.EdDSAPrivateKey;
@@ -156,12 +158,12 @@ public class JWK7517 {
      */
     static JSONObject toJwk(ECPrivateKey key) {
         ECDSAPrivateKey ek = ECDSA.toECDSAKey(key);
-        EllipticCurve.ECCurvep curve = ek.getCurve();
+        ECCurve curve = ek.getCurve();
 
-        int plen = (curve.p.bitLength()+7)/8;
-        int nlen = (curve.n.bitLength()+7)/8;
+        int plen = (curve.getP().bitLength()+7)/8;
+        int nlen = (curve.getN().bitLength()+7)/8;
         BigInteger d = ek.getS();
-        EllipticCurve.Point Y = curve.xG(d);
+        EllipticCurve.ECPoint Y = curve.xG(d);
         
         JSONObject jwk = new JSONObject();
         jwk.put("kty","EC");
@@ -180,10 +182,10 @@ public class JWK7517 {
      */
     static JSONObject toJwk(ECPublicKey key) {
         ECDSAPublicKey pub = ECDSA.toECDSAKey(key);
-        EllipticCurve.ECCurvep curve = pub.getCurve();
+        ECCurve curve = pub.getCurve();
 
-        int plen = (curve.p.bitLength()+7)/8;
-        EllipticCurve.Point Y = pub.getY();
+        int plen = (curve.getP().bitLength()+7)/8;
+        EllipticCurve.ECPoint Y = pub.getY();
 
         JSONObject jwk = new JSONObject();
         jwk.put("kty","EC");
@@ -193,7 +195,7 @@ public class JWK7517 {
         return jwk;
     }
 
-    static String toCrvName(EllipticCurve curve) {
+    static String toCrvName(ECCurve curve) {
         String crv;
 /*
         if (curve instanceof EdWards25519) {
